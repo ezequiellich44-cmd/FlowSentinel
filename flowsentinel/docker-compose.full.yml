@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: flowsentinel_timescale
+    environment:
+      - POSTGRES_DB=flowsentinel
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: flowsentinel_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  local_test_receiver:
+    build: .
+    container_name: flowsentinel_receiver
+    command: uvicorn flowsentinel.alerting.local_test_receiver:app --host 0.0.0.0 --port 8002
+    ports:
+      - "8002:8002"
+    depends_on:
+      - redis
+
+  app:
+    build: .
+    container_name: flowsentinel_app
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@timescaledb:5432/flowsentinel
+      - REDIS_URL=redis://redis:6379/0
+      - WEBHOOK_URL=http://local_test_receiver:8002/webhook
+      - PIPELINE_BACKPRESSURE_LIMIT=100
+      - MEMPOOL_SEMAPHORE_LIMIT=10
+      - LIQUIDITY_SEMAPHORE_LIMIT=5
+    ports:
+      - "8000:8000"
+    depends_on:
+      - timescaledb
+      - redis
+      - local_test_receiver
+    command: uvicorn flowsentinel.observability.server:app --host 0.0.0.0 --port 8000
+
+volumes:
+  timescale_data:
+  redis_data:
